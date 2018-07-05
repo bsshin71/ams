@@ -126,7 +126,7 @@ pivot = false
 
 func (m *Altibase) BuildConnectionString() string {
 
-	sAltibaseHome := os.Getenv("GOLDILOCKS_HOME")
+	sAltibaseHome := os.Getenv("ALTIBASE_HOME")
 	sDriverPath := strings.Replace(m.OdbcDriverPath, "?", sAltibaseHome, 1)
 
 	sConnectionString := fmt.Sprintf("DRIVER=%s;DSN=%s;HOST=%s;PORT=%d;UID=%s;PWD=%s", sDriverPath, m.Host, m.Host, m.Port, m.User, m.Password)
