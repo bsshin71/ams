@@ -6,26 +6,60 @@ import (
 	_ "github.com/alexbrainman/odbc"
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/plugins/inputs"
+	"github.com/influxdata/toml"
+	"io/ioutil"
 	"os"
 	"strings"
 	"sync"
 )
 
 type MonitorElement struct {
+	SeriesName string   `toml:"series_name"`
 	Sql        string   `toml:"sql"`
 	Tags       []string `toml:"tags"`
 	Fields     []string `toml:"fields"`
 	Pivot      bool     `toml:"pivot"`
 	PivotKey   string   `toml:"pivot_key"`
-	SeriesName string   `toml:"series_name"`
+	Enable     bool     `toml:"enable"`
 }
+
+type MonitorElements struct {
+	Title    string     `toml:"title"`
+	MonQuery []MonQuery `toml:"monitor_query"`
+}
+
 type Altibase struct {
-	OdbcDriverPath string           `toml:"altibase_odbc_driver_path"`
-	Host           string           `toml:"altibase_host"`
-	Port           int              `toml:"altibase_port"`
-	User           string           `toml:"altibase_user"`
-	Password       string           `toml:"altibase_password"`
-	Elements       []MonitorElement `toml:"elements"`
+	OdbcDriverPath string     `toml:"altibase_odbc_driver_path"`
+	Host           string     `toml:"altibase_host"`
+	Port           int        `toml:"altibase_port"`
+	User           string     `toml:"altibase_user"`
+	Password       string     `toml:"altibase_password"`
+	QueryVersion   string     `toml:"altibase_queryversion"`
+	QueryFile      string     `toml:"altibase_queryfile"`
+	Elements       []MonQuery `toml:"elements"`
+}
+
+var monquery MonitorElements
+var isInitialized = false
+
+func initQueries(m *Altibase) {
+
+	f, err := os.Open(m.QueryFile)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	buf, err := ioutil.ReadAll(f)
+	if err != nil {
+		panic(err)
+	}
+
+	if err := toml.Unmarshal(buf, &monquery); err != nil {
+		panic(err)
+	}
+
+	isInitialized = true
 }
 
 func init() {
@@ -39,89 +73,11 @@ var sampleConfig = `
 ## specify connection string
 altibase_odbc_driver_path = "?/lib/libaltibasecs-ul64.so" 
 altibase_host = "127.0.0.1" 
-altibase_port = 37562
-altibase_user = "test"
-altibase_password = "test"
-
-
-###### DO NOT EDIT : Start  ########################################
-[[ inputs.altibase.elements ]]
-series_name = "altibase_default_tags"
-sql = """
-SELECT * FROM V$DATABASE
-
-"""
-###### DO NOT EDIT : End   ########################################
-
-
-[[ inputs.altibase.elements]]
-series_name="session_stat"
-sql = """
-SELECT NVL( CLIENT_ADDRESS, 'DA') CLIENT_ADDRESS,
-       COUNT(*) CNT
-FROM V$SESSION
-WHERE USER_NAME IS NOT NULL
-AND   PROGRAM_NAME != 'gmaster'
-GROUP BY CLIENT_ADDRESS
-"""
-tags = ["CLIENT_ADDRESS"]
-fields = ["CNT"]
-pivot = false
-
-[[ inputs.altibase.elements ]]
-series_name = "altibase_statement_stat"
-sql = """
-SELECT 
-"""
-tags = []
-fields = ["TOTAL_COUNT", "LONG_RUNNING_COUNT"]
-pivot = false
-
-[[ inputs.altibase.elements ]]
-
-series_name = "altibase_sql_execution_stat"
-sql = """
-SELECT
-
-"""
-tags = []
-fields = ["VALUE"]
-pivot_key = "STAT_NAME"
-pivot = true
-
-[[ inputs.altibase.elements ]]
-series_name = "altibase_transaction_stat"
-sql = """
-SELECT
-"""
-
-tags = []
-fields = ["ACTIVE_TRANSACTIONS", "WAIT_TRANSACTIONS"]
-pivot_key = ""
-pivot = false
-
-[[ inputs.altibase.elements ]]
-series_name = "altibase_cluster_net_stat"
-sql = """
-SELECT
-"""
-tags = ["TYPE"]
-fields = ["RX_BYTES", "TX_BYTES", "RX_JOBS", "TX_JOBS"]
-pivot_key = ""
-pivot = false
-
-
-[[ inputs.altibase.elements ]]
-series_name = "altibase_tablespaces"
-sql = """
-SELECT
-"""
-tags = ["NAME"]
-fields = ["TOTAL_BYTES", "USED_BYTES", "USED_PCT"]
-pivot_key = ""
-pivot = false
-
-
+altibase_port = 20300
+altibase_user = "sys"
+altibase_password = "manager"
+altibase_queryversion="V6"
+altibase_queryfile="query.toml"
 `
 
 func (m *Altibase) BuildConnectionString() string {
@@ -152,6 +108,10 @@ func (m *Altibase) Gather(acc telegraf.Accumulator) error {
 
 	if m.OdbcDriverPath == "" {
 		return nil
+	}
+
+	if !isInitialized {
+		initQueries(m)
 	}
 
 	// Loop through each server and collect metrics

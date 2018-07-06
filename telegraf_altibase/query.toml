@@ -1,0 +1,55 @@
+
+title="Altibase Monitoring Elements"
+
+[[monitor_query]]
+series_name ="altibase_basic_info"
+tags=[]
+fields=["PRODUCT_VERSION"]
+pivot=false
+enable=true
+sql="""
+select
+             d.db_name
+            ,v.PRODUCT_VERSION
+            ,i.STARTUP_PHASE
+            ,n.NLS_CHARACTERSET
+            ,decode(a.ARCHIVE_MODE,1,'Archive log', 'No archive log') as LOG_MODE 
+            ,decode(i.STARTUP_TIME_SEC, 0, '0', to_char( to_date('1970010109','YYYYMMDDHH') +   STARTUP_TIME_SEC/ (60*60*24), 'YY
+YY/MM/DD HH:MI:SS' ) ) as DB_UP_TIME
+from  v$database d
+     ,v$version  v
+     ,v$instance i
+     ,( select NLS_CHARACTERSET
+        from  v$nls_parameters
+        limit 1
+      ) n
+     , v$archive a
+"""
+
+
+[[monitor_query]]
+series_name ="altibase_mem_stat"
+tags=[]
+fields=["MEM_MAX_SIZE", "ALLOC_MEM_SIZE"]
+pivot=false
+enable=true
+sql="""
+ select
+           lpad(trunc(MEM_MAX_DB_SIZE/1024/1024),20,' ') as MEM_MAX_SIZE
+          ,lpad(trunc(MEM_ALLOC_PAGE_COUNT * 32 * 1024 /1024/1024), 20, ' ') as ALLOC_MEM_SIZE
+ from
+          v$database
+          
+"""
+
+[[monitor_query]]
+series_name ="altibase_buffhit_stat"
+tags=[]
+fields=["HIT_RATIO"]
+pivot=false
+enable=true
+sql="""
+  select
+          round((GET_PAGES + FIX_PAGES - READ_PAGES) / ( GET_PAGES + FIX_PAGES), 2) * 100 || '%' as HIT_RATIO
+  from   V$BUFFPOOL_STAT
+ """ 
