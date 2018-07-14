@@ -4,7 +4,7 @@ title="Altibase Monitoring Elements"
 [[monitor_query]]
 series_name ="altibase_basic_info"
 tags=[]
-fields=["PRODUCT_VERSION"]
+fields=["DB_NAME","PRODUCT_VERSION", "STARTUP_PHASE", "NLS_CHARACTERSET", "LOG_MODE", "DB_UP_TIME"]
 pivot=false
 enable=true
 sql="""
