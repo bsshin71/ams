@@ -9,11 +9,10 @@ import (
 	"github.com/influxdata/toml"
 	"io/ioutil"
 	"os"
-	"strings"
 	"sync"
 )
 
-type MonitorElement struct {
+type MonQuery struct {
 	SeriesName string   `toml:"series_name"`
 	Sql        string   `toml:"sql"`
 	Tags       []string `toml:"tags"`
@@ -29,14 +28,13 @@ type MonitorElements struct {
 }
 
 type Altibase struct {
-	OdbcDriverPath string     `toml:"altibase_odbc_driver_path"`
-	Host           string     `toml:"altibase_host"`
-	Port           int        `toml:"altibase_port"`
-	User           string     `toml:"altibase_user"`
-	Password       string     `toml:"altibase_password"`
-	QueryVersion   string     `toml:"altibase_queryversion"`
-	QueryFile      string     `toml:"altibase_queryfile"`
-	Elements       []MonQuery `toml:"elements"`
+	Dsn          string `toml:"altibase_dsn"`
+	Server       string `toml:"altibase_server"`
+	Port         int    `toml:"altibase_port"`
+	User         string `toml:"altibase_user"`
+	Password     string `toml:"altibase_password"`
+	QueryVersion string `toml:"altibase_queryversion"`
+	QueryFile    string `toml:"altibase_queryfile"`
 }
 
 var monquery MonitorElements
@@ -71,10 +69,10 @@ func init() {
 var sampleConfig = `
 
 ## specify connection string
-altibase_odbc_driver_path = "?/lib/libaltibasecs-ul64.so" 
-altibase_host = "127.0.0.1" 
-altibase_port = 20300
-altibase_user = "sys"
+altibase_dsn    = "Altiodbc" 
+altibase_server = "127.0.0.1" 
+altibase_port   = 20300
+altibase_user   = "sys"
 altibase_password = "manager"
 altibase_queryversion="V6"
 altibase_queryfile="query.toml"
@@ -82,10 +80,7 @@ altibase_queryfile="query.toml"
 
 func (m *Altibase) BuildConnectionString() string {
 
-	sAltibaseHome := os.Getenv("ALTIBASE_HOME")
-	sDriverPath := strings.Replace(m.OdbcDriverPath, "?", sAltibaseHome, 1)
-
-	sConnectionString := fmt.Sprintf("DRIVER=%s;DSN=%s;HOST=%s;PORT=%d;UID=%s;PWD=%s", sDriverPath, m.Host, m.Host, m.Port, m.User, m.Password)
+	sConnectionString := fmt.Sprintf("DSN=%s;SERVER=%s;PORT=%d;USER=%s;PASSWORD=%s", m.Dsn, m.Server, m.Port, m.User, m.Password)
 	return sConnectionString
 }
 
@@ -106,7 +101,7 @@ func (m *Altibase) Gather(acc telegraf.Accumulator) error {
 	var wg sync.WaitGroup
 	connectionString := m.BuildConnectionString()
 
-	if m.OdbcDriverPath == "" {
+	if m.Dsn == "" {
 		return nil
 	}
 
@@ -129,33 +124,18 @@ func (m *Altibase) Gather(acc telegraf.Accumulator) error {
 func (m *Altibase) getCommonTags(db *sql.DB) map[string]string {
 
 	v := make(map[string]string)
-	for _, element := range m.Elements {
-
-		if element.SeriesName == "altibase_default_tags" {
-			q, err := m.getSQLResult(db, element.Sql)
-			if err != nil {
-				return nil
-			}
-
-			for k, _ := range q[0] {
-				v[k] = q[0][k].(string)
-			}
-			break
-		}
-	}
 
 	return v
 }
 
 func (m *Altibase) runSQL(acc telegraf.Accumulator, db *sql.DB) error {
 
-	for _, element := range m.Elements {
-		tags := m.getCommonTags(db)
-		fields := make(map[string]interface{})
-
-		if element.SeriesName == "altibase_default_tags" {
+	for _, element := range monquery.MonQuery {
+		if !element.Enable {
 			continue
 		}
+		tags := m.getCommonTags(db)
+		fields := make(map[string]interface{})
 
 		r, err := m.getSQLResult(db, element.Sql)
 		if err != nil {
