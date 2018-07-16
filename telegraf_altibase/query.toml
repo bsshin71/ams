@@ -30,16 +30,17 @@ from  v$database d
 [[monitor_query]]
 series_name ="altibase_mem_stat"
 tags=[]
-fields=["MEM_MAX_SIZE", "ALLOC_MEM_SIZE"]
+fields=["MEM_MAX_SIZE", "ALLOC_DB_SIZE", "MEM_USED_RATIO", "BUFFER_SIZE"]
 pivot=false
 enable=true
 sql="""
  select
-           lpad(trunc(MEM_MAX_DB_SIZE/1024/1024),20,' ') as MEM_MAX_SIZE
-          ,lpad(trunc(MEM_ALLOC_PAGE_COUNT * 32 * 1024 /1024/1024), 20, ' ') as ALLOC_MEM_SIZE
+             MEM_MAX_DB_SIZE
+           ,(MEM_ALLOC_PAGE_COUNT * 32 * 1024) as  ALLOC_DB_SIZE
+           ,((MEM_ALLOC_PAGE_COUNT * 32 * 1024) / MEM_MAX_DB_SIZE )  * 100 AS MEM_USED_RATIO
+           ,(SELECT  POOL_SIZE * PAGE_SIZE  FROM V$BUFFPOOL_STAT ) AS BUFFER_SIZE
  from
           v$database
-          
 """
 
 [[monitor_query]]
@@ -53,3 +54,17 @@ sql="""
           round((GET_PAGES + FIX_PAGES - READ_PAGES) / ( GET_PAGES + FIX_PAGES), 2) * 100 || '%' as HIT_RATIO
   from   V$BUFFPOOL_STAT
  """ 
+
+[[monitor_query]]
+series_name ="altibase_session_stat"
+tags=[]
+fields=["CURRENT_SESSION_CNT", "EXEC_SESSION_CNT", "MAX_CLIENT_CNT"]
+pivot=false
+enable=true
+sql="""
+  select
+       ( select count(*)  from v$session )                               as CURRENT_SESSION_CNT
+      ,( select count(*)  from v$session  where task_state='EXECUTING' ) as EXEC_SESSION_CNT
+      ,( select value1    from v$property where name = 'MAX_CLIENT'    ) as MAX_CLIENT_CNT
+  from dual
+"""
