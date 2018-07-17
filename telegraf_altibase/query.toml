@@ -84,7 +84,7 @@ sql="""
 """
 
 [[monitor_query]]
-series_name ="altibase_servicethread_stat"
+series_name ="altibase_srv_stat"
 tags=[]
 fields=["STATE", "CNT"]
 pivot_key = "STATE"
