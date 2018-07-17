@@ -150,7 +150,7 @@ func (m *Altibase) runSQL(acc telegraf.Accumulator, db *sql.DB) error {
 				}
 
 				key := v[element.PivotKey].(string)
-				data := v[element.Fields[0]]
+				data := v[element.Fields[1]]
 				fields[key] = data
 			}
 			acc.AddFields(element.SeriesName, fields, tags)

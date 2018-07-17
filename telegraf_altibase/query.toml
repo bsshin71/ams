@@ -83,4 +83,28 @@ sql="""
  from V$SQL_PLAN_CACHE
 """
 
-
+[[monitor_query]]
+series_name ="altibase_servicethread_stat"
+tags=[]
+fields=["STATE", "CNT"]
+pivot_key = "STATE"
+pivot=true
+enable=true
+sql="""
+     SELECT 
+            STATE
+          , COUNT(*) AS CNT
+    FROM V$SERVICE_THREAD
+    GROUP BY STATE
+UNION ALL
+      SELECT 
+           'TOTAL' AS STATE
+           ,COUNT(*)
+      FROM V$SERVICE_THREAD        
+UNION ALL
+      SELECT
+           RUN_MODE AS STATE
+          ,COUNT(*)
+      FROM V$SERVICE_THREAD
+      GROUP BY RUN_MODE   
+"""
