@@ -68,7 +68,6 @@ sql="""
   from dual
 """
 
-<<<<<<< HEAD
 [[monitor_query]]
 series_name ="altibase_plancache_stat"
 tags=[]
@@ -83,6 +82,3 @@ sql="""
       ,CACHE_MISS_COUNT/(CACHE_HIT_COUNT+CACHE_MISS_COUNT) * 100.00 AS CACHE_MISS_RATIO 	  
  from V$SQL_PLAN_CACHE
 """
-=======
-
->>>>>>> 70d32aa0ed5b65b596a22068a300b68e6ea0dcc1
