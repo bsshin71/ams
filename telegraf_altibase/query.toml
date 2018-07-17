@@ -14,8 +14,7 @@ select
             ,i.STARTUP_PHASE
             ,n.NLS_CHARACTERSET
             ,decode(a.ARCHIVE_MODE,1,'Archive log', 'No archive log') as LOG_MODE 
-            ,decode(i.STARTUP_TIME_SEC, 0, '0', to_char( to_date('1970010109','YYYYMMDDHH') +   STARTUP_TIME_SEC/ (60*60*24), 'YY
-YY/MM/DD HH:MI:SS' ) ) as DB_UP_TIME
+            ,decode(i.STARTUP_TIME_SEC, 0, '0', to_char( to_date('1970010109','YYYYMMDDHH') +   i.STARTUP_TIME_SEC/ (60*60*24), 'YYYY/MM/DD HH:MI:SS' ) ) as DB_UP_TIME
 from  v$database d
      ,v$version  v
      ,v$instance i
@@ -51,7 +50,7 @@ pivot=false
 enable=true
 sql="""
   select
-          round((GET_PAGES + FIX_PAGES - READ_PAGES) / ( GET_PAGES + FIX_PAGES), 2) * 100 || '%' as HIT_RATIO
+          (GET_PAGES + FIX_PAGES - READ_PAGES) / ( GET_PAGES + FIX_PAGES) * 100.00 as HIT_RATIO
   from   V$BUFFPOOL_STAT
  """ 
 
@@ -65,10 +64,11 @@ sql="""
   select
        ( select count(*)  from v$session )                               as CURRENT_SESSION_CNT
       ,( select count(*)  from v$session  where task_state='EXECUTING' ) as EXEC_SESSION_CNT
-      ,( select value1    from v$property where name = 'MAX_CLIENT'    ) as MAX_CLIENT_CNT
+      ,( select to_number(value1)    from v$property where name = 'MAX_CLIENT'    ) as MAX_CLIENT_CNT
   from dual
 """
 
+<<<<<<< HEAD
 [[monitor_query]]
 series_name ="altibase_plancache_stat"
 tags=[]
@@ -83,3 +83,6 @@ sql="""
       ,CACHE_MISS_COUNT/(CACHE_HIT_COUNT+CACHE_MISS_COUNT) * 100.00 AS CACHE_MISS_RATIO 	  
  from V$SQL_PLAN_CACHE
 """
+=======
+
+>>>>>>> 70d32aa0ed5b65b596a22068a300b68e6ea0dcc1
