@@ -36,7 +36,7 @@ sql="""
  select
              MEM_MAX_DB_SIZE
            ,(MEM_ALLOC_PAGE_COUNT * 32 * 1024) as  ALLOC_DB_SIZE
-           ,((MEM_ALLOC_PAGE_COUNT * 32 * 1024) / MEM_MAX_DB_SIZE )  * 100 AS MEM_USED_RATIO
+           ,((MEM_ALLOC_PAGE_COUNT * 32 * 1024) / MEM_MAX_DB_SIZE )  * 100.00 AS MEM_USED_RATIO
            ,(SELECT  POOL_SIZE * PAGE_SIZE  FROM V$BUFFPOOL_STAT ) AS BUFFER_SIZE
  from
           v$database
@@ -57,7 +57,7 @@ sql="""
 [[monitor_query]]
 series_name ="altibase_session_stat"
 tags=[]
-fields=["CURRENT_SESSION_CNT", "EXEC_SESSION_CNT", "MAX_CLIENT_CNT"]
+fields=["CURRENT_SESSION_CNT", "EXEC_SESSION_CNT", "MAX_CLIENT_CNT", "STATEMENT_CNT"]
 pivot=false
 enable=true
 sql="""
@@ -65,6 +65,7 @@ sql="""
        ( select count(*)  from v$session )                               as CURRENT_SESSION_CNT
       ,( select count(*)  from v$session  where task_state='EXECUTING' ) as EXEC_SESSION_CNT
       ,( select to_number(value1)    from v$property where name = 'MAX_CLIENT'    ) as MAX_CLIENT_CNT
+      ,( select count(*)  from v$statement)                             as STATEMENT_CNT
   from dual
 """
 
@@ -86,7 +87,7 @@ sql="""
 [[monitor_query]]
 series_name ="altibase_srv_stat"
 tags=[]
-fields=["STATE", "CNT"]
+fields=["CNT"]
 pivot_key = "STATE"
 pivot=true
 enable=true
@@ -107,4 +108,151 @@ UNION ALL
           ,COUNT(*)
       FROM V$SERVICE_THREAD
       GROUP BY RUN_MODE   
+"""
+# 트랜잭션 갯수
+[[monitor_query]]
+series_name ="alti_tx_count"
+tags=["TX_STATUS"]
+fields=["TRANSACTION_CNT"]
+pivot=false
+pivot_key=""
+enable=true
+sql="""
+  select
+             decode(tx.STATUS,0,'BEGIN', 3, 'COMMIT', 4, 'ROLLBACK', 5, 'BLOCKED', 6, 'END', 'UNKNOWN' ) AS TX_STATUS
+           , count(*)   as TRANSACTION_CNT
+  from   v$TRANSACTION tx
+  group by  tx.STATUS
+"""
+
+#   유저별 세션/statement 갯수
+[[monitor_query]]
+series_name ="alti_userss_count"
+tags=["DB_USERNAME"]
+fields=["SESSION_CNT", "STMT_CNT"]
+pivot=false
+enable=false
+sql="""
+  select   ss.DB_USERNAME
+            , count(*) AS SESSION_CNT
+            , nvl(sum(stmt_cnt),0)  AS STMT_CNT
+  from v$session ss left outer join 
+      (
+          select           
+                       session_id
+                     , count(*)  as stmt_cnt
+          from v$statement
+          group by session_id
+      )  st    on  ss.id = st.session_id
+  group by db_username    
+"""
+
+# lock 상태별 갯수
+[[monitor_query]]
+series_name ="alti_locktable_stat"
+tags=[]
+fields=["LOCK_ITEM_TYPE", "LOCK_DESC", "LOCK_CNT"]
+pivot=false
+enable=true
+sql="""
+    select 
+                    decode(vlock.LOCK_ITEM_TYPE, NULL, 'Abnormal', 'TBS', 'TableSpace', 'TBL', 'Table', 'DBF', 'DataFile', 'UNKNOWN' ) AS LOCK_ITEM_TYPE
+                  , vlock.LOCK_DESC as LOCK_DESC
+                  , count(*)   AS LOCK_CNT
+    from      v$lock vlock
+    group  by    LOCK_ITEM_TYPE,     LOCK_DESC   
+""" 
+
+
+#  DML  종류별 통계
+[[monitor_query]]
+series_name ="alti_sysstat"
+tags=["NAME"]
+fields=["VALUE"]
+pivot=false
+enable=true
+sql="""
+    select NAME, VALUE  from v$sysstat where name not like '%time: %'
+"""
+
+            
+# tbs 별 File/IO
+[[monitor_query]]
+series_name ="alti_tbsfileIO_stat"
+tags=["TBS_NAME"]
+fields=["PHYSICALREADS", "PHYSICALWRITE", "READ_PERCENT", "WRITE_PERCENT", "TOTAL_IO_PERCENT", "AVGTIME"]
+pivot=false
+enable=true
+sql="""
+    select
+            TBS_NAME
+          ,sum( PHYRDS)       as  PHYSICALREADS
+          ,sum( PHYWRTS)    as  PHYSICALWRITE
+          , avg(readper)         as  READ_PERCENT
+          , avg(writeper)         as  WRITE_PERCENT
+          , avg(tot_io)             as  TOTAL_IO_PERCENT
+          , avg( avgtime )        as   AVGTIME
+    from
+    (
+        select
+               ts.name  as tbs_name
+              ,df.NAME  as file_name
+              ,fs.PHYRDS
+              ,fs.PHYWRTS
+              ,round((fs.PHYRDS/tot.rds)*100, 1) readper
+              ,round((fs.PHYWRTS/decode(tot.wrts, 0, 1, tot.wrts))*100, 1) writeper
+              ,round((fs.phyrds + fs.phywrts)/(tot.rds+tot.wrts)*100, 1) tot_io
+              ,round(fs.avgiotim/1000,3) avgtime
+        from v$datafiles   df
+           , v$filestat    fs
+           , v$tablespaces ts
+           , ( select sum(PHYRDS) rds, sum(PHYWRTS) wrts from V$FILESTAT ) tot
+        where df.id     = fs.FILEID
+        and  df.SPACEID = fs.SPACEID
+        and  df.SPACEID = ts.id
+    )
+    group by tbs_name
+"""
+
+# disk tbs 별 사용량
+[[monitor_query]]
+series_name ="alti_tbs_usage"
+tags=[ "TBS_TYPE", "TBS_NAME"]
+fields=["MAX_SIZE", "TOTAL_SIZE", "ALLOC_SIZE", "USED_SIZE", "USAGE_PERCENT", "STATE"]
+pivot=false
+enable=true
+sql="""
+  SELECT DECODE(TYPE, 3, 'SYSTEM TABLESPACE', 
+                                        4, 'USER DATA TABLESPACE', 
+                                        5, 'SYSTEM TABLESPACE', 
+                                        6, 'USER TEMP TABLESPACE', 
+                                        7, 'SYSTEM TABLESPACE')       AS TBS_TYPE
+                   , NAME                                             AS TBS_NAME   
+                   , (D.MAX * PAGE_SIZE)                              AS MAX_SIZE
+                   , TOTAL_PAGE_COUNT * PAGE_SIZE                     AS TOTAL_SIZE
+                   , DECODE(TYPE, 7,   U.TOTAL_EXT_CNT*PROP.EXTENT_SIZE  
+                                               ,   ALLOCATED_PAGE_COUNT * PAGE_SIZE )    AS ALLOC_SIZE
+                   , DECODE(TYPE, 3, NVL(DS.USED, 0), 
+                                             4,  NVL(DS.USED, 0),
+                                             7,  (U.TX_EXT_CNT+U.USED_EXT_CNT+U.UNSTEALABLE_EXT_CNT) * PROP.EXTENT_SIZE
+                                              ,  0)                                  AS    USED_SIZE
+                   , DECODE(TYPE, 7, TO_CHAR((((U.TX_EXT_CNT+U.USED_EXT_CNT+U.UNSTEALABLE_EXT_CNT) * PROP.EXTENT_SIZE)/(D.MAX*PAGE_SIZE))*100, '99.99'),
+                                              3, TO_CHAR(NVL(DS.USED, 0)/(D.MAX*PAGE_SIZE)* 100, '99.99'),
+                                             4, TO_CHAR(NVL(DS.USED, 0)/(D.MAX*PAGE_SIZE)* 100, '99.99')
+                                             , TO_CHAR((ALLOCATED_PAGE_COUNT/D.MAX) * 100, '99.99'))       AS USAGE_PERCENT
+                   , DECODE(STATE, 1, 'OFFLINE', 2, 'ONLINE', 5, 'OFFLINE BACKUP', 6, 'ONLINE BACKUP', 128, 'DROPPED', 'DISCARDED')    AS  STATE 
+                   , D.AUTOEXTEND
+    FROM V$TABLESPACES T LEFT OUTER JOIN(SELECT SPACE_ID , SUM(TOTAL_USED_SIZE) USED
+                                           FROM X$SEGMENT
+                                          GROUP BY SPACE_ID) DS ON DS.SPACE_ID = T.ID
+       , (SELECT SPACEID
+               , SUM(DECODE(MAXSIZE, 0, CURRSIZE, MAXSIZE)) AS MAX
+               , DECODE(MAX(AUTOEXTEND), 1, 'ON', 'OFF') 'AUTOEXTEND'
+            FROM V$DATAFILES
+           GROUP BY SPACEID ) D
+       , V$DISK_UNDO_USAGE U
+       , (SELECT VALUE1 EXTENT_SIZE
+            FROM V$PROPERTY
+           WHERE NAME = 'SYS_UNDO_TBS_EXTENT_SIZE') PROP
+   WHERE T.ID = D.SPACEID 
 """
