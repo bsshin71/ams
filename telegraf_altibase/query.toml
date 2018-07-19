@@ -123,6 +123,11 @@ sql="""
            , count(*)   as TRANSACTION_CNT
   from   v$TRANSACTION tx
   group by  tx.STATUS
+union all 
+  select
+           'TOTAL' AS TX_STATUS
+           , ( select count(*) from v$transaction tx ) AS TRANSACTION_CNT
+   from dual
 """
 
 #   유저별 세션/statement 갯수
@@ -150,8 +155,8 @@ sql="""
 # lock 상태별 갯수
 [[monitor_query]]
 series_name ="alti_locktable_stat"
-tags=[]
-fields=["LOCK_ITEM_TYPE", "LOCK_DESC", "LOCK_CNT"]
+tags=["LOCK_ITEM_TYPE","LOCK_DESC"]
+fields=["LOCK_CNT"]
 pivot=false
 enable=true
 sql="""
@@ -255,4 +260,84 @@ sql="""
             FROM V$PROPERTY
            WHERE NAME = 'SYS_UNDO_TBS_EXTENT_SIZE') PROP
    WHERE T.ID = D.SPACEID 
+"""
+
+# Lock 잡은 Object  조회
+[[monitor_query]]
+series_name ="alti_lockobj_list"
+tags=["LOCK_ITEM_TYPE"]
+fields=[ "SID", "DB_USERNAME", "TBS_NAME", "TABLE_NAME", "LOCK_DESC"]
+pivot=false
+enable=true
+sql="""
+   select decode(LOCK_ITEM_TYPE, NULL, 'Abnormal', 'TBS', 'TableSpace', 'TBL', 'Table', 'DBF', 'DataFile', 'UNKNOWN' ) AS LOCK_ITEM_TYPE
+       , vss.id            AS SID
+       , vss.DB_USERNAME   AS DB_USERNAME
+       , vts.name             AS TBS_NAME
+       , tbl.table_name    AS TABLE_NAME
+       , vlock.LOCK_DESC   AS LOCK_DESC
+ from
+       v$lock vlock
+       left   outer join system_.sys_tables_ tbl
+              on vlock.table_oid  = tbl.table_oid
+       left outer join v$tablespaces vts
+              on vlock.tbs_id     = vts.id
+       left outer join ( select
+                                 session_id
+                               , tx_id
+                         from v$statement
+                         group by session_id , tx_id
+                       )  vst
+              on vlock.TRANS_ID = vst.TX_ID
+       left outer join v$session   vss
+              on vst.SESSION_ID = vss.id
+  where vlock.LOCK_ITEM_TYPE = 'TBL'
+  limit 30              
+"""
+
+
+# Top 10 SQL Ordered by Elap/Exec(sec) Time =
+[[monitor_query]]
+series_name ="alti_top10sql_list"
+tags=[]
+fields=["USERNAME", "ELAPEXEC_SEC", "ELAPSED_TIME", "EXECUTIONS", "GETS_EXEC", "CLIENT" ,"STMT_ID", "QUERY"]
+pivot=false
+enable=true
+sql="""
+select
+             ss.DB_USERNAME    as USERNAME
+          ,  st.total_time /(st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE )/1000000 * 1.00        as ELAPEXEC_SEC
+          ,  st.total_time/1000000   * 1.000                                                 as ELAPSED_TIME
+          ,  (st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE )                                      as EXECUTIONS
+          , lpad( round(st.GET_PAGE/(st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE ),3), 15, ' ' ) as GETS_EXEC
+          , decode(ss.CLIENT_APP_INFO,'', CLIENT_TYPE , ss.CLIENT_APP_INFO )                 as CLIENT
+          , st.id                                                                            as STMT_ID
+          , replace2( substring(ltrim(query), 1, 80), chr(10), '')   as QUERY
+from
+         V$STATEMENT st
+      ,  V$SESSION   ss
+where
+      st.SESSION_ID  =  ss.ID
+  and st.total_time >= 0
+  and (st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE ) > 0
+order by 2 desc
+limit 10           
+"""
+
+# count of Long running SQL take longer than 5 second
+[[monitor_query]]
+series_name ="alti_longrunsql_count"
+tags=[]
+fields=["SQL_COUNT"]
+pivot=false
+enable=true
+sql="""
+select
+          count(*)  AS  SQL_COUNT
+from
+         V$STATEMENT st
+where
+         st.total_time /1000000 >= 5
+  and (st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE ) > 0
+  and st.EXECUTE_FLAG = 1 
 """
