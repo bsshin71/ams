@@ -292,7 +292,7 @@ sql="""
        left outer join v$session   vss
               on vst.SESSION_ID = vss.id
   where vlock.LOCK_ITEM_TYPE = 'TBL'
-  limit 30              
+  limit 10              
 """
 
 
@@ -300,14 +300,14 @@ sql="""
 [[monitor_query]]
 series_name ="alti_top10sql_list"
 tags=[]
-fields=["USERNAME", "ELAPEXEC_SEC", "ELAPSED_TIME", "EXECUTIONS", "GETS_EXEC", "CLIENT" ,"STMT_ID", "QUERY"]
+fields=["USERNAME", "ELAPEXEC_SEC", "ELAPSED_TIME","EXECUTIONS", "GETS_EXEC", "CLIENT" ,"STMT_ID", "QUERY"]
 pivot=false
 enable=true
 sql="""
 select
              ss.DB_USERNAME    as USERNAME
-          ,  st.total_time /(st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE )/1000000 * 1.00        as ELAPEXEC_SEC
-          ,  st.total_time/1000000   * 1.000                                                 as ELAPSED_TIME
+          ,  st.total_time /(st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE )/1000000.0             as ELAPEXEC_SEC
+          ,  st.total_time/1000000.0                                                           as ELAPSED_TIME
           ,  (st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE )                                      as EXECUTIONS
           , lpad( round(st.GET_PAGE/(st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE ),3), 15, ' ' ) as GETS_EXEC
           , decode(ss.CLIENT_APP_INFO,'', CLIENT_TYPE , ss.CLIENT_APP_INFO )                 as CLIENT
@@ -320,6 +320,7 @@ where
       st.SESSION_ID  =  ss.ID
   and st.total_time >= 0
   and (st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE ) > 0
+--  and st.EXECUTE_FLAG = 1 
 order by 2 desc
 limit 10           
 """
@@ -340,4 +341,22 @@ where
          st.total_time /1000000 >= 5
   and (st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE ) > 0
   and st.EXECUTE_FLAG = 1 
+"""
+
+
+# Undo Buffer 상태 조회
+[[monitor_query]]
+series_name ="alti_undobuff_stat"
+tags=[]
+fields=["READ_PAGE_COUNT", "GET_PAGE_COUNT", "FIX_PAGE_COUNT", "CREATE_PAGE_COUNT", "HIT_RATIO"]
+pivot=false
+enable=true
+sql="""
+  select
+              READ_PAGE_COUNT
+            , GET_PAGE_COUNT
+            , FIX_PAGE_COUNT
+            , CREATE_PAGE_COUNT
+            , HIT_RATIO 
+  from  V$UNDO_BUFF_STAT               
 """
