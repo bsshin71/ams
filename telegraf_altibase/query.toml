@@ -227,39 +227,71 @@ fields=["MAX_SIZE", "TOTAL_SIZE", "ALLOC_SIZE", "USED_SIZE", "USAGE_PERCENT", "S
 pivot=false
 enable=true
 sql="""
-  SELECT DECODE(TYPE, 3, 'SYSTEM TABLESPACE', 
-                                        4, 'USER DATA TABLESPACE', 
-                                        5, 'SYSTEM TABLESPACE', 
-                                        6, 'USER TEMP TABLESPACE', 
-                                        7, 'SYSTEM TABLESPACE')       AS TBS_TYPE
-                   , NAME                                             AS TBS_NAME   
-                   , (D.MAX * PAGE_SIZE)                              AS MAX_SIZE
-                   , TOTAL_PAGE_COUNT * PAGE_SIZE                     AS TOTAL_SIZE
-                   , DECODE(TYPE, 7,   U.TOTAL_EXT_CNT*PROP.EXTENT_SIZE  
-                                               ,   ALLOCATED_PAGE_COUNT * PAGE_SIZE )    AS ALLOC_SIZE
-                   , DECODE(TYPE, 3, NVL(DS.USED, 0), 
-                                             4,  NVL(DS.USED, 0),
-                                             7,  (U.TX_EXT_CNT+U.USED_EXT_CNT+U.UNSTEALABLE_EXT_CNT) * PROP.EXTENT_SIZE
-                                              ,  0)                                  AS    USED_SIZE
-                   , DECODE(TYPE, 7, TO_CHAR((((U.TX_EXT_CNT+U.USED_EXT_CNT+U.UNSTEALABLE_EXT_CNT) * PROP.EXTENT_SIZE)/(D.MAX*PAGE_SIZE))*100, '99.99'),
-                                              3, TO_CHAR(NVL(DS.USED, 0)/(D.MAX*PAGE_SIZE)* 100, '99.99'),
-                                             4, TO_CHAR(NVL(DS.USED, 0)/(D.MAX*PAGE_SIZE)* 100, '99.99')
-                                             , TO_CHAR((ALLOCATED_PAGE_COUNT/D.MAX) * 100, '99.99'))       AS USAGE_PERCENT
-                   , DECODE(STATE, 1, 'OFFLINE', 2, 'ONLINE', 5, 'OFFLINE BACKUP', 6, 'ONLINE BACKUP', 128, 'DROPPED', 'DISCARDED')    AS  STATE 
-                   , D.AUTOEXTEND
-    FROM V$TABLESPACES T LEFT OUTER JOIN(SELECT SPACE_ID , SUM(TOTAL_USED_SIZE) USED
-                                           FROM X$SEGMENT
-                                          GROUP BY SPACE_ID) DS ON DS.SPACE_ID = T.ID
-       , (SELECT SPACEID
-               , SUM(DECODE(MAXSIZE, 0, CURRSIZE, MAXSIZE)) AS MAX
-               , DECODE(MAX(AUTOEXTEND), 1, 'ON', 'OFF') 'AUTOEXTEND'
-            FROM V$DATAFILES
-           GROUP BY SPACEID ) D
-       , V$DISK_UNDO_USAGE U
-       , (SELECT VALUE1 EXTENT_SIZE
-            FROM V$PROPERTY
-           WHERE NAME = 'SYS_UNDO_TBS_EXTENT_SIZE') PROP
-   WHERE T.ID = D.SPACEID 
+          SELECT DECODE(TYPE, 3, 'SYSTEM TABLESPACE', 
+                                                4, 'USER DATA TABLESPACE', 
+                                                5, 'SYSTEM TABLESPACE', 
+                                                6, 'USER TEMP TABLESPACE', 
+                                                7, 'SYSTEM TABLESPACE')       AS TBS_TYPE
+                           , NAME                                             AS TBS_NAME   
+                           , (D.MAX * PAGE_SIZE)                              AS MAX_SIZE
+                           , TOTAL_PAGE_COUNT * PAGE_SIZE                     AS TOTAL_SIZE
+                           , DECODE(TYPE, 7,   U.TOTAL_EXT_CNT*PROP.EXTENT_SIZE  
+                                                       ,   ALLOCATED_PAGE_COUNT * PAGE_SIZE )    AS ALLOC_SIZE
+                           , DECODE(TYPE, 3, NVL(DS.USED, 0), 
+                                                     4,  NVL(DS.USED, 0), 
+                                                     7,  (U.TX_EXT_CNT+U.USED_EXT_CNT+U.UNSTEALABLE_EXT_CNT) * PROP.EXTENT_SIZE
+                                                      ,  0)                                  AS    USED_SIZE
+                           , DECODE(TYPE, 7,    (((U.TX_EXT_CNT+U.USED_EXT_CNT+U.UNSTEALABLE_EXT_CNT) * PROP.EXTENT_SIZE)/(D.MAX*PAGE_SIZE))*100 ,
+                                                      3,  NVL(DS.USED, 0)/(D.MAX*PAGE_SIZE)* 100 ,
+                                                      4,  NVL(DS.USED, 0)/(D.MAX*PAGE_SIZE)* 100, 
+                                                        (ALLOCATED_PAGE_COUNT/D.MAX) * 100 )       AS USAGE_PERCENT
+                           , DECODE(STATE, 1, 'OFFLINE', 2, 'ONLINE', 5, 'OFFLINE BACKUP', 6, 'ONLINE BACKUP', 128, 'DROPPED', 'DISCARDED')    AS  STATE 
+                           , D.AUTOEXTEND
+            FROM V$TABLESPACES T LEFT OUTER JOIN(SELECT SPACE_ID , SUM(TOTAL_USED_SIZE) USED
+                                                   FROM X$SEGMENT
+                                                  GROUP BY SPACE_ID) DS ON DS.SPACE_ID = T.ID
+               , (SELECT SPACEID
+                       , SUM(DECODE(MAXSIZE, 0, CURRSIZE, MAXSIZE)) AS MAX 
+                       , DECODE(MAX(AUTOEXTEND), 1, 'ON', 'OFF') 'AUTOEXTEND'
+                    FROM V$DATAFILES
+                   GROUP BY SPACEID ) D 
+               , V$DISK_UNDO_USAGE U
+               , (SELECT VALUE1 EXTENT_SIZE
+                    FROM V$PROPERTY
+                   WHERE NAME = 'SYS_UNDO_TBS_EXTENT_SIZE') PROP
+           WHERE T.ID = D.SPACEID 
+UNION  ALL
+          SELECT 
+                       DECODE(TYPE, 0, 'MEMORY_DICTIONARY', 1, 'MEMORY_SYS_DATA', 2, 'MEMORY_USER_DATA', 8, 'VOLATILE_USER_DATA')     AS TBS_TYPE
+                     , NAME    AS  TBS_NAME
+                     , DECODE(M.MAXSIZE, 140737488322560, D.MEM_MAX_DB_SIZE , 0 , T.TOTAL_PAGE_COUNT * T.PAGE_SIZE, M.MAXSIZE)    AS MAX_SIZE
+                     , M.ALLOC_PAGE_COUNT * T.PAGE_SIZE                                                         AS TOTAL_SIZE
+                     ,NVL( M.ALLOC_PAGE_COUNT-M.FREE_PAGE_COUNT,T.TOTAL_PAGE_COUNT)*PAGE_SIZE     AS  ALLOC_SIZE
+                     , NVL(MT.USED, 0)                                                                                   AS  USED_SIZE 
+                     , DECODE(MAXSIZE, 140737488322560, (M.ALLOC_PAGE_COUNT-M.FREE_PAGE_COUNT)*T.PAGE_SIZE/ D.MEM_MAX_DB_SIZE ,
+                                    0, (M.ALLOC_PAGE_COUNT-M.FREE_PAGE_COUNT) / T.TOTAL_PAGE_COUNT , (M.ALLOC_PAGE_COUNT-M.FREE_PAGE_COUNT) * T.PAGE_SIZE/ M.MAXSIZE) * 100   AS USAGE_PERCENT
+                     , DECODE(T.STATE,1,'OFFLINE',2,'ONLINE',5,'OFFLINE BACKUP',6,'ONLINE BACKUP',128,'DROPPED', 'DISCARDED')   AS  STATE
+                     , DECODE(M.AUTOEXTEND_MODE,1,'ON','OFF')     AS AUTOEXTEND
+            FROM V$DATABASE D
+               , V$TABLESPACES T
+               , (SELECT SPACE_ID
+                       , SPACE_NAME
+                       , ALLOC_PAGE_COUNT
+                       , FREE_PAGE_COUNT
+                       , DECODE(MAX_SIZE, 0, (SELECT VALUE1 FROM V$PROPERTY WHERE NAME = 'VOLATILE_MAX_DB_SIZE'), MAX_SIZE) AS MAXSIZE
+                       , AUTOEXTEND_MODE
+                    FROM V$VOL_TABLESPACES
+                   UNION
+                  SELECT SPACE_ID
+                       , SPACE_NAME
+                       , ALLOC_PAGE_COUNT
+                       , FREE_PAGE_COUNT
+                       , MAXSIZE
+                       , AUTOEXTEND_MODE
+                    FROM V$MEM_TABLESPACES ) M LEFT OUTER JOIN(SELECT TABLESPACE_ID,   SUM( FIXED_USED_MEM + VAR_USED_MEM )   USED
+                    FROM V$MEMTBL_INFO
+                   GROUP BY TABLESPACE_ID ) MT ON M.SPACE_ID = MT.TABLESPACE_ID
+           WHERE T.ID = M.SPACE_ID;
 """
 
 # Lock 잡은 Object  조회
@@ -318,11 +350,11 @@ from
       ,  V$SESSION   ss
 where
       st.SESSION_ID  =  ss.ID
-  and st.total_time >= 0
+  and st.total_time >= 5
   and (st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE ) > 0
---  and st.EXECUTE_FLAG = 1 
+  and st.EXECUTE_FLAG = 1 
 order by 2 desc
-limit 10           
+limit 30           
 """
 
 # count of Long running SQL take longer than 5 second
