@@ -177,7 +177,26 @@ fields=["VALUE"]
 pivot=false
 enable=true
 sql="""
-    select NAME, VALUE  from v$sysstat where name not like '%time: %'
+       select    *
+       from
+       (        
+                    select NAME, VALUE  from v$sysstat where name not like '%time: %'  and  seqnum not in ( 29, 30, 31 )
+           union all       
+                    select    'execute success count : insert' as NAME
+                             , (   select  sum ( value ) from  v$sysstat where seqnum in ( 29, 33 ) ) as VALUE
+                    from dual 
+           union all       
+                    select    'execute success count : update' as NAME
+                             , (   select  sum ( value ) from  v$sysstat where seqnum in ( 30, 34 ) ) as VALUE
+                    from dual 
+           union all       
+                    select    'execute success count : delete' as NAME
+                             , (   select  sum ( value ) from  v$sysstat where seqnum in ( 31, 35 ) )  as VALUE
+                    from dual 
+           union all
+                    select NAME, VALUE from v$sysstat where seqnum in   ( 61, 62, 63, 64, 65, 66 , 92 )                     
+        )
+        order by 1
 """
 
             
@@ -392,3 +411,141 @@ sql="""
             , HIT_RATIO 
   from  V$UNDO_BUFF_STAT               
 """
+
+#이중화 GAP 상태 조회
+[[monitor_query]]
+series_name ="alti_repgap_stat"
+tags=["REP_NAME"]
+fields=["REP_GAP", "REP_LAST_SN", "REP_SN"]
+pivot=false
+enable=true
+sql="""
+select 
+         REP_NAME
+      ,  REP_GAP
+      ,  REP_LAST_SN
+      ,  REP_SN
+from V$REPGAP                
+"""
+
+#이중화 Sender 통계정보 
+# TIMED_STATISTICS 프로퍼티의 값이 1로 설정되어야 한다.
+[[monitor_query]]
+series_name ="alti_repsender_stat"
+tags=["REP_NAME"]
+fields=["PARALLEL_ID", "READ_LOG_FROM_REPLBUFFER", "READ_LOG_FROM_FILE", "SEND_XLOG", "RECV_ACK"]
+pivot=false
+enable=true
+sql="""
+select
+      REP_NAME
+     ,  PARALLEL_ID
+     , READ_LOG_FROM_REPLBUFFER
+     , READ_LOG_FROM_FILE
+     , SEND_XLOG
+     , RECV_ACK
+from  V$REPSENDER_STATISTICS               
+"""
+
+#이중화 Sender 정보 
+[[monitor_query]]
+series_name ="alti_repsender_info"
+tags=["REP_NAME"]
+fields=["START_MODE", "NET_ERROR", "XSN", "COMMIT_XSN", "STATUS", "READ_LOG_COUNT","SEND_LOG_COUNT","REPL_MODE","ACT_REPL_MODE"]
+pivot=false
+enable=true
+sql="""
+select
+      s.REP_NAME
+     ,  decode(s.START_FLAG, 0, 'NORMAL', 1, 'QUICK', 2, 'SYNC', 
+                                 3, 'SYNC_ONLY', 4, 'SYNC_RUN', 5, 'SYNC_END', 
+                                 6, 'RECOVERY from Replication', 7, 'OFFLINE', 8, 'PARALLEL') AS START_MODE
+     , decode( s.NET_ERROR_FLAG, 0, 'NO error', 'Network Error') AS  NET_ERROR
+     , s.XSN
+     ,s.COMMIT_XSN
+     ,decode(s.STATUS, 0, 'STOP', 1, 'RUN', 2, 'RETRY',
+                          3,'FAILBACK NORMAL', 4, 'FAILBACK MASTER', 5, 'FAILBACK SLAVE',
+                          6, 'SYNC',7, 'FAILBACK EAGER', 8, 'FAILBACK FLUSH', 9, 'IDLE' )  AS STATUS
+    , s.READ_LOG_COUNT
+    , s.SEND_LOG_COUNT
+    , s.REPL_MODE
+    , s.ACT_REPL_MODE
+from V$REPSENDER s              
+"""
+
+
+#이중화 Sender 테이블별 로그  전송 정보 
+[[monitor_query]]
+series_name ="alti_repsender_tblog_stat"
+tags=["REP_NAME","TABLE_NAME"]
+fields=["TABLE_OID","INSERT_LOG_COUNT", "DELETE_LOG_COUNT", "UPDATE_LOG_COUNT", "LOB_LOG_COUNT"]
+pivot=false
+enable=true
+sql="""
+select
+        r.REP_NAME                    
+      , r.TABLE_OID
+      , t.TABLE_NAME
+      , r.INSERT_LOG_COUNT
+      , r.DELETE_LOG_COUNT
+      , r.UPDATE_LOG_COUNT
+      , r.LOB_LOG_COUNT
+from V$REPSENDER_SENT_LOG_COUNT  r
+     , system_.sys_tables_   t
+where r.TABLE_OID = t.TABLE_OID                  
+"""
+
+
+#이중화 Sender 별  로그  전송 정보 
+[[monitor_query]]
+series_name ="alti_repsender_log_stat"
+tags=["REP_NAME"]
+fields=["INSERT_LOG_COUNT", "DELETE_LOG_COUNT", "UPDATE_LOG_COUNT", "LOB_LOG_COUNT"]
+pivot=false
+enable=true
+sql="""
+select
+        r.REP_NAME                    
+      , sum(r.INSERT_LOG_COUNT) AS INSERT_LOG_COUNT
+      , sum(r.DELETE_LOG_COUNT) AS DELETE_LOG_COUNT
+      , sum(r.UPDATE_LOG_COUNT) AS UPDATE_LOG_COUNT
+      , sum(r.LOB_LOG_COUNT)   AS LOB_LOG_COUNT
+from V$REPSENDER_SENT_LOG_COUNT  r
+group by   r.REP_NAME     
+"""
+
+#이중화 Sender stop/start 여부 확인
+[[monitor_query]]
+series_name ="alti_repsender_start_stat"
+tags=["REPLICATION_NAME"]
+fields=["REP_STATE","IS_STARTED"]
+pivot=false
+enable=true
+sql="""
+select  a.REPLICATION_NAME
+       , decode(b.rep_name, null, 'STOP', a.IS_STARTED, 0, 'STOP', 1, 'START') AS REP_STATE 
+       , decode(b.rep_name, null, 0, a.IS_STARTED ) AS IS_STARTED 
+from system_.sys_replications_ a left outer join v$repsender b
+ on a.REPLICATION_NAME = REP_NAME
+where a.XSN > -1
+"""
+
+#이중화 Receiver 상태 정보
+[[monitor_query]]
+series_name ="alti_reprecv_stat"
+tags=["REPLICATION_NAME"]
+fields=["IS_STARTED","INSERT_SUCCESS_COUNT","INSERT_FAILURE_COUNT","UPDATE_SUCCESS_COUNT","UPDATE_FAILURE_COUNT","DELETE_SUCCESS_COUNT","DELETE_FAILURE_COUNT"]
+pivot=false
+enable=true
+sql="""
+select  a.REPLICATION_NAME
+       , decode(b.rep_name, null, 'STOP', 'START' ) AS IS_STARTED 
+       ,  INSERT_SUCCESS_COUNT 
+       ,  INSERT_FAILURE_COUNT 
+       ,  UPDATE_SUCCESS_COUNT
+       , UPDATE_FAILURE_COUNT
+       , DELETE_SUCCESS_COUNT
+       , DELETE_FAILURE_COUNT 
+from system_.sys_replications_ a left outer join V$REPRECEIVER   b
+ on a.REPLICATION_NAME = REP_NAME 
+"""    
