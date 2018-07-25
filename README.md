@@ -1,10 +1,6 @@
-# ams
-Graphical monitoring system for ALTIBASE
-
-Build with using InfluxDB, Telegraf, Grafana
-
-
-
+# AMS (Altibase Monitoring System)
+AMS is a graphical monitoring system for ALTIBASE
+It was built with using only open sources  such as  InfluxDB, Telegraf, Grafana
 
 
 # 1. Open Source 기반으로 제작된  Altibase  모니터링 솔류션을 상용 솔류션 대비 저렴한 가격으로  제공합니다.  
