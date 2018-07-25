@@ -208,34 +208,29 @@ fields=["PHYSICALREADS", "PHYSICALWRITE", "READ_PERCENT", "WRITE_PERCENT", "TOTA
 pivot=false
 enable=true
 sql="""
-    select
-            TBS_NAME
-          ,sum( PHYRDS)       as  PHYSICALREADS
-          ,sum( PHYWRTS)    as  PHYSICALWRITE
-          , avg(readper)         as  READ_PERCENT
-          , avg(writeper)         as  WRITE_PERCENT
-          , avg(tot_io)             as  TOTAL_IO_PERCENT
-          , avg( avgtime )        as   AVGTIME
-    from
-    (
-        select
+ select
+             ts.TBS_NAME
+            ,PHYRDS            as  PHYSICALREADS
+            ,PHYWRTS          as  PHYSICALWRITE
+            ,round((ts.PHYRDS/tot.rds)*100, 1)   as   READ_PERCENT
+            ,round((ts.PHYWRTS/decode(tot.wrts, 0, 1, tot.wrts))*100, 1)  as WRITE_PERCENT
+            ,round((ts.phyrds + ts.phywrts)/(tot.rds+tot.wrts)*100, 1)  as TOTAL_IO_PERCENT
+            ,ts.avgtime
+  from
+  (  
+         select
                ts.name  as tbs_name
-              ,df.NAME  as file_name
-              ,fs.PHYRDS
-              ,fs.PHYWRTS
-              ,round((fs.PHYRDS/tot.rds)*100, 1) readper
-              ,round((fs.PHYWRTS/decode(tot.wrts, 0, 1, tot.wrts))*100, 1) writeper
-              ,round((fs.phyrds + fs.phywrts)/(tot.rds+tot.wrts)*100, 1) tot_io
-              ,round(fs.avgiotim/1000,3) avgtime
-        from v$datafiles   df
-           , v$filestat    fs
-           , v$tablespaces ts
-           , ( select sum(PHYRDS) rds, sum(PHYWRTS) wrts from V$FILESTAT ) tot
+              ,sum(fs.PHYRDS)         as PHYRDS
+              ,sum(fs.PHYWRTS)      as PHYWRTS
+              ,round( avg(fs.avgiotim) /1000, 3 )         as avgtime
+        from v$datafiles   df  
+             , v$filestat    fs  
+            , v$tablespaces ts
         where df.id     = fs.FILEID
-        and  df.SPACEID = fs.SPACEID
-        and  df.SPACEID = ts.id
-    )
-    group by tbs_name
+          and  df.SPACEID = fs.SPACEID
+          and  df.SPACEID = ts.id
+      group by ts.name
+ )  ts  ,  ( select sum(PHYRDS) rds, sum(PHYWRTS) wrts from V$FILESTAT ) tot 
 """
 
 # disk tbs 별 사용량
@@ -373,7 +368,7 @@ where
   and (st.EXECUTE_SUCCESS + st.EXECUTE_FAILURE ) > 0
   and st.EXECUTE_FLAG = 1 
 order by 2 desc
-limit 30           
+limit 10           
 """
 
 # count of Long running SQL take longer than 5 second
@@ -404,12 +399,13 @@ pivot=false
 enable=true
 sql="""
   select
-              READ_PAGE_COUNT
-            , GET_PAGE_COUNT
-            , FIX_PAGE_COUNT
-            , CREATE_PAGE_COUNT
-            , HIT_RATIO 
-  from  V$UNDO_BUFF_STAT               
+             sum( READ_PAGE_COUNT ) AS READ_PAGE_COUNT
+            ,sum( GET_PAGE_COUNT ) AS GET_PAGE_COUNT
+            ,sum(  FIX_PAGE_COUNT ) as FIX_PAGE_COUNT
+            ,sum( CREATE_PAGE_COUNT ) as CREATE_PAGE_COUNT
+            , avg(HIT_RATIO ) as  HIT_RATIO
+  from  V$UNDO_BUFF_STAT    
+  where HIT_RATIO > 0 
 """
 
 #이중화 GAP 상태 조회
