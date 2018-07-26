@@ -10,7 +10,7 @@ It was built with using only open sources  such as  InfluxDB, Telegraf, Grafana
 
  
 
-# 2. Snapshot 
+# 2. Screenshot 
 
 ## 2.1 Home 화면
 
